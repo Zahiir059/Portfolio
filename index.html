@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a6c74">
+<title>Portfolio Builder</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="view" tabindex="-1"></main>
+
+<nav id="nav" aria-label="Main">
+  <button type="button" data-go="portfolio">Portfolio</button>
+  <button type="button" data-go="add">Add</button>
+  <button type="button" data-go="profile">Profile</button>
+  <button type="button" data-go="backup">Backup</button>
+</nav>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<div id="lightbox" hidden>
+  <img alt="">
+  <button type="button" id="lb-close" class="btn">Close</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
