@@ -1,20 +1,19 @@
-# Portfolio Builder
+# Zaheer Abbas Portfolio
 
-A phone app (installable web app) where you add your own projects, images, videos and graphs. Everything is saved on your phone and your portfolio builds as you add.
+Installable portfolio app, already filled with the details from your CV and portfolio PDF.
 
-## Files
-
-- `index.html`, `style.css`, `app.js`: the app
-- `manifest.webmanifest`, `sw.js`, `icon-192.png`, `icon-512.png`: make it installable and work offline
+## What is inside
+- Animated power-factor wave hero (voltage vs current, live cos φ)
+- Experience timeline, projects with search, skills, education, certifications
+- Everything editable: Profile tab (resume sections) and Add/Edit for projects (images, videos, graphs)
+- Dark / Light mode and 5 accent colours
+- Download CV as PDF (print layout), WhatsApp, email, call and share buttons
+- Visitor mode with optional PIN, backup/restore, works offline, installable on phone
 
 ## Put it online (GitHub Pages)
-
-1. Create a new public repository on GitHub, for example `portfolio`.
-2. Choose "uploading an existing file" and drag in every file from this folder (the files, not the folder itself). Commit.
-3. Open Settings, then Pages. Under Source pick "Deploy from a branch", branch `main`, folder `/ (root)`, then Save.
-4. After about a minute your app is at `https://YOUR-USERNAME.github.io/portfolio/`.
-5. Open that link in Chrome on your phone, open the menu and choose "Install app" or "Add to Home screen".
+1. Create a public repository, upload every file from this folder (not the folder itself), commit.
+2. Settings > Pages > Deploy from branch `main`, folder `/ (root)`.
+3. Open the link in Chrome on your phone and choose Install app.
 
 ## Your data
-
-Projects, images and videos are stored inside the browser on the phone. They are not uploaded anywhere. Use the Backup tab regularly to save a copy, because clearing browser data deletes them.
+Stored in the browser (IndexedDB). Use Backup regularly. "Reset to my CV data" in Backup restores the original content.

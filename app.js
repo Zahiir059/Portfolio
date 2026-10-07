@@ -251,6 +251,10 @@
   /* ---------- navigation ---------- */
   let currentId = null;
   function go(v, id) {
+    if (document.startViewTransition && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) { document.startViewTransition(() => go0(v, id)); return; }
+    go0(v, id);
+  }
+  function go0(v, id) {
     current = v;
     currentId = id || null;
     clearUrls();
@@ -270,49 +274,124 @@
     view.focus({ preventScroll: true });
   }
 
+  /* ---------- theme, visitor mode, seed ---------- */
+  const LS = { get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
+  const ACCENTS = ['#22d3ee', '#f5a524', '#34d399', '#a78bfa', '#fb7185'];
+  function applyTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = LS.get('pb-theme') || 'dark';
+    const a = LS.get('pb-accent') || ACCENTS[0];
+    const n = parseInt(a.slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    r.style.setProperty('--accent', r.dataset.theme === 'light' ? 'color-mix(in srgb,' + a + ' 62%, #06202a)' : a);
+    r.style.setProperty('--accent-ink', lum > 0.45 && r.dataset.theme !== 'light' ? '#06121a' : '#ffffff');
+    r.style.setProperty('--s1', a);
+    document.body.classList.toggle('visitor', LS.get('pb-visitor') === '1');
+    drawAllCharts();
+  }
+  async function seedOnce() {
+    if (await dbGetKV('seeded')) return;
+    await dbPutKV('seeded', 1);
+    if (projects.length || Object.keys(profile).length) return;
+    const S = window.SEED; if (!S) return;
+    const grab = async (f) => { try { return await (await fetch(f)).blob(); } catch (e) { return null; } };
+    const pr = Object.assign({}, S.profile);
+    pr.photo = pr.photoFile ? await grab(pr.photoFile) : undefined;
+    delete pr.photoFile;
+    await dbPutKV('profile', pr);
+    const now = Date.now();
+    for (let i = 0; i < S.projects.length; i++) {
+      const p = S.projects[i];
+      const imgs = (await Promise.all(p.images.map(grab))).filter(Boolean);
+      await dbPutProject(Object.assign({ links: '', videos: [], id: uid(), created: now - i * 1000, updated: now }, p, { images: imgs }));
+    }
+    await loadAll();
+  }
+
   /* ---------- portfolio ---------- */
+  const lines = (t) => String(t || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const parts = (l) => l.split('|').map((s) => s.trim());
+  let wave = 0;
+  function drawWave() {
+    const cv = $('#wave');
+    if (!cv || !cv.isConnected) return;
+    const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const still = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const t = still ? 1.2 : wave;
+    const phi = (Math.sin(t * 0.5) + 1) * 0.5 * 1.2;
+    c.clearRect(0, 0, w, h);
+    [['--muted', 0, 1.5], ['--accent', phi, 2.5]].forEach(([col, ph, lw]) => {
+      c.strokeStyle = css(col); c.lineWidth = lw; c.beginPath();
+      for (let x = 0; x <= w; x += 3) {
+        const y = h / 2 + Math.sin((x / w) * Math.PI * 4 - t * 2 - ph) * h * 0.34;
+        x ? c.lineTo(x, y) : c.moveTo(x, y);
+      }
+      c.stroke();
+    });
+    const pf = $('#pf');
+    if (pf) pf.textContent = 'cos \u03c6 = ' + Math.cos(phi).toFixed(2);
+    if (!still) { wave += 0.016; requestAnimationFrame(drawWave); }
+  }
   function renderPortfolio() {
     const p = profile;
-    const contact = [];
-    if (p.location) contact.push(`<span>${esc(p.location)}</span>`);
-    if (p.email) contact.push(`<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`);
-    if (p.phone) contact.push(`<span>${esc(p.phone)}</span>`);
-    if (p.linkedin) contact.push(/^https?:\/\//i.test(p.linkedin) ? `<a href="${esc(p.linkedin)}" target="_blank" rel="noopener">${esc(p.linkedin.replace(/^https?:\/\/(www\.)?/i, ''))}</a>` : `<span>${esc(p.linkedin)}</span>`);
-
+    const wa = p.whatsapp ? 'https://wa.me/' + String(p.whatsapp).replace(/\D/g, '') : '';
+    const stats = lines(p.statsText).map(parts).map(([v, l]) => `<div class="stat-c"><b>${esc(v)}</b><span>${esc(l || '')}</span></div>`).join('');
+    const skills = lines(p.skillsText).map((l) => { const i = l.indexOf(':'); return i < 0 ? ['', l] : [l.slice(0, i), l.slice(i + 1)]; })
+      .map(([g, v]) => `<div class="sk"><h3>${esc(g)}</h3><ul class="tags">${v.split(',').map((s) => s.trim()).filter(Boolean).map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`).join('');
+    const exp = String(p.expText || '').split(/\n\s*\n/).map((b) => lines(b)).filter((b) => b.length).map((b) => {
+      const [t, o, d] = parts(b[0]);
+      return `<li class="tl"><div class="tl-h"><h3>${esc(t)}</h3><span class="label">${esc(d || '')}</span></div><p class="org">${esc(o || '')}</p><ul class="bul">${b.slice(1).map((x) => `<li>${esc(x)}</li>`).join('')}</ul></li>`;
+    }).join('');
+    const rows = (t) => lines(t).map(parts).map(([a, b, c]) => `<li class="tl"><div class="tl-h"><h3>${esc(a)}</h3><span class="label">${esc(c || '')}</span></div><p class="org">${esc(b || '')}</p></li>`).join('');
     const cards = projects.map((pr) => {
       const counts = [];
       if (pr.images.length) counts.push(pr.images.length + (pr.images.length === 1 ? ' image' : ' images'));
       if (pr.videos.length) counts.push(pr.videos.length + (pr.videos.length === 1 ? ' video' : ' videos'));
       if (pr.graphs.length) counts.push(pr.graphs.length + (pr.graphs.length === 1 ? ' graph' : ' graphs'));
-      return `<article class="pcard" data-open="${esc(pr.id)}" tabindex="0" role="button" aria-label="Open ${esc(pr.title)}">
-        ${pr.images.length ? `<img class="cover" src="${url(pr.images[0])}" alt="">` : `<div class="nocover">No image</div>`}
-        <div class="pbody">
-          <h3>${esc(pr.title)}</h3>
-          ${pr.summary ? `<p>${esc(pr.summary)}</p>` : ''}
+      return `<article class="pcard" data-open="${esc(pr.id)}" data-text="${esc((pr.title + ' ' + pr.tools.join(' ') + ' ' + pr.summary).toLowerCase())}" tabindex="0" role="button" aria-label="Open ${esc(pr.title)}">
+        ${pr.images.length ? `<img class="cover" src="${url(pr.images[0])}" alt="">` : `<div class="nocover">${esc(pr.title.slice(0, 2))}</div>`}
+        <div class="pbody"><h3>${esc(pr.title)}</h3>${pr.summary ? `<p>${esc(pr.summary)}</p>` : ''}
           ${pr.tools.length ? `<ul class="tags">${pr.tools.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-          ${counts.length ? `<span class="counts">${counts.join(' · ')}</span>` : ''}
-        </div>
-      </article>`;
+          ${counts.length ? `<span class="counts">${counts.join(' \u00b7 ')}</span>` : ''}</div></article>`;
     }).join('');
-
+    const sw = ACCENTS.map((a) => `<button type="button" class="sw" style="background:${a}" data-act="accent" data-i="${a}" aria-label="Accent ${a}"></button>`).join('');
     view.innerHTML = `
       <section class="hero">
-        ${p.photo ? `<img class="avatar" src="${url(p.photo)}" alt="">` : ''}
-        <div>
-          <h1>${esc(p.name || 'Your name')}</h1>
-          ${p.headline ? `<p class="headline">${esc(p.headline)}</p>` : ''}
-          ${contact.length ? `<div class="contact">${contact.join('')}</div>` : ''}
+        <canvas id="wave" aria-hidden="true"></canvas>
+        <div class="hero-in">
+          ${p.photo ? `<img class="avatar" src="${url(p.photo)}" alt="${esc(p.name)}">` : ''}
+          <div><h1>${esc(p.name || 'Your name')}</h1>
+            ${p.headline ? `<p class="headline">${esc(p.headline)}</p>` : ''}
+            <p class="pf" id="pf"></p></div>
         </div>
       </section>
+      <div class="cta noprint">
+        ${wa ? `<a class="btn" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+        ${p.email ? `<a class="btn ghost" href="mailto:${esc(p.email)}">Email me</a>` : ''}
+        ${p.phone ? `<a class="btn ghost" href="tel:${esc(p.phone.replace(/\s/g, ''))}">Call</a>` : ''}
+        <button type="button" class="btn ghost" data-act="print">Download CV (PDF)</button>
+        <button type="button" class="btn ghost" data-act="share">Share</button>
+        <span class="tools"><button type="button" class="btn ghost small" data-act="theme">Light / Dark</button>${sw}</span>
+      </div>
+      <div class="contact">${[p.location && `<span>${esc(p.location)}</span>`, p.email && `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>`, p.phone && `<span>${esc(p.phone)}</span>`, p.linkedin && `<a href="${esc(p.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>`].filter(Boolean).join('')}</div>
       ${p.about ? `<p class="about">${esc(p.about)}</p>` : ''}
       ${!p.name ? `<p class="hint">Open the Profile tab to add your name, headline and contact details.</p>` : ''}
+      ${stats ? `<div class="stats">${stats}</div>` : ''}
+      ${exp ? `<div class="sec-head"><h2>Experience</h2></div><ul class="tls">${exp}</ul>` : ''}
       <div class="sec-head"><h2>Projects</h2><span class="label">${projects.length}</span></div>
-      ${projects.length ? `<div class="grid">${cards}</div>` : `
-        <div class="empty">
-          <p>No projects yet. Add your first project with its details, images, videos and graphs, and it will appear here.</p>
-          <button type="button" class="btn" data-act="new">Add a project</button>
-        </div>`}
+      ${projects.length > 3 ? `<input type="search" id="q" class="search noprint" placeholder="Search projects or tools, e.g. PLC" aria-label="Search projects">` : ''}
+      ${projects.length ? `<div class="grid">${cards}</div><p class="empty" id="noq" hidden>No project matches your search.</p>` : `
+        <div class="empty"><p>No projects yet. Add your first project with its details, images, videos and graphs, and it will appear here.</p>
+        <button type="button" class="btn" data-act="new">Add a project</button></div>`}
+      ${skills ? `<div class="sec-head"><h2>Skills</h2></div><div class="skills">${skills}</div>` : ''}
+      ${p.eduText ? `<div class="sec-head"><h2>Education</h2></div><ul class="tls">${rows(p.eduText)}</ul>` : ''}
+      ${p.certsText ? `<div class="sec-head"><h2>Certifications</h2></div><ul class="tls">${rows(p.certsText)}</ul>` : ''}
+      <footer class="noprint"><button type="button" class="linkbtn" data-act="owner">Owner login</button></footer>
     `;
+    wave = 0; requestAnimationFrame(drawWave);
   }
 
   /* ---------- project detail ---------- */
@@ -470,6 +549,15 @@
           </div>
           <label class="field"><span>LinkedIn link</span><input type="url" data-p="linkedin" value="${esc(p.linkedin)}" placeholder="https://linkedin.com/in/..." autocomplete="off"></label>
         </section>
+        <section class="panel">
+          <h2>Resume sections</h2>
+          <label class="field"><span>WhatsApp number, digits only</span><input type="tel" data-p="whatsapp" value="${esc(p.whatsapp)}" placeholder="923001234567"></label>
+          <label class="field"><span>Highlights, one per line: value | label</span><textarea class="mono" data-p="statsText" rows="4">${esc(p.statsText)}</textarea></label>
+          <label class="field"><span>Skills, one per line: Group: item, item</span><textarea class="mono" data-p="skillsText" rows="7">${esc(p.skillsText)}</textarea></label>
+          <label class="field"><span>Experience: title | company | dates, then one bullet per line. Blank line between jobs</span><textarea class="mono" data-p="expText" rows="12">${esc(p.expText)}</textarea></label>
+          <label class="field"><span>Education, one per line: degree | school | dates</span><textarea class="mono" data-p="eduText" rows="3">${esc(p.eduText)}</textarea></label>
+          <label class="field"><span>Certifications, one per line: name | issuer | year</span><textarea class="mono" data-p="certsText" rows="3">${esc(p.certsText)}</textarea></label>
+        </section>
         <div class="actions"><button type="button" class="btn" data-act="save-profile">Save profile</button></div>
       </div>`;
     window.scrollTo(0, y);
@@ -502,6 +590,12 @@
           <h2>Restore</h2>
           <p class="note">Pick a backup file saved earlier. Projects with the same id are replaced, others are kept.</p>
           <label class="field"><span>Backup file</span><input type="file" id="restore-file" accept="application/json,.json"></label>
+        </section>
+        <section class="panel">
+          <h2>Visitor mode</h2>
+          <p class="note">Hides the Add, Profile and Backup tabs so people you share the app with only see your portfolio. The PIN is a convenience lock, not strong security.</p>
+          <label class="field"><span>PIN to come back (optional)</span><input type="password" id="pin" inputmode="numeric" value="${esc(LS.get('pb-pin') || '')}" autocomplete="off"></label>
+          <div class="actions"><button type="button" class="btn ghost" data-act="visitor">Turn on visitor mode</button><button type="button" class="btn danger" data-act="reseed">Reset to my CV data</button></div>
         </section>
         <section class="panel">
           <h2>Install</h2>
@@ -613,6 +707,19 @@
       case 'save-profile': saveProfile(); break;
       case 'backup': downloadBackup(); break;
       case 'share-backup': shareBackup(); break;
+      case 'print': window.print(); break;
+      case 'share': try { await navigator.share({ title: profile.name, url: location.href }); } catch (err) { if (navigator.clipboard) { navigator.clipboard.writeText(location.href); toast('Link copied'); } } break;
+      case 'theme': LS.set('pb-theme', (LS.get('pb-theme') || 'dark') === 'dark' ? 'light' : 'dark'); applyTheme(); break;
+      case 'accent': LS.set('pb-accent', el.dataset.i); applyTheme(); break;
+      case 'visitor': LS.set('pb-pin', ($('#pin').value || '').trim()); LS.set('pb-visitor', '1'); applyTheme(); go('portfolio'); toast('Visitor mode on'); break;
+      case 'owner': { const pin = LS.get('pb-pin'); if (!pin || window.prompt('Enter PIN') === pin) { LS.set('pb-visitor', '0'); applyTheme(); toast('Owner mode on'); } else toast('Wrong PIN'); break; }
+      case 'reseed':
+        if (window.confirm('Replace everything with the original CV data? Your edits will be lost.')) {
+          for (const x of projects) await dbDelProject(x.id);
+          await tx('kv', 'readwrite', (s) => { s.delete('profile'); s.delete('seeded'); });
+          projects = []; profile = {}; await seedOnce(); toast('Reset done'); go('portfolio');
+        }
+        break;
       case 'install':
         if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; renderBackup(); }
         break;
@@ -626,6 +733,11 @@
   });
 
   function onField(t) {
+    if (t.id === 'q') {
+      const q = t.value.trim().toLowerCase(); let n = 0;
+      $$('.pcard').forEach((c) => { const ok = !q || c.dataset.text.includes(q); c.hidden = !ok; if (ok) n++; });
+      const m = $('#noq'); if (m) m.hidden = n > 0;
+    }
     if (t.dataset.f && draft) draft[t.dataset.f] = t.value;
     if (t.dataset.p && pdraft) pdraft[t.dataset.p] = t.value;
     if (t.dataset.g !== undefined && draft) {
@@ -676,6 +788,8 @@
     try {
       await openDB();
       await loadAll();
+      await seedOnce();
+      applyTheme();
       go('portfolio');
     } catch (err) {
       view.innerHTML = '<div class="empty"><p>This browser cannot store data for the app. Open it in Chrome and make sure you are not in a private window.</p></div>';
